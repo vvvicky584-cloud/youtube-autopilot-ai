@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>YouTube Autopilot AI</title>
+<style>
+:root{--bg:#0f1115;--card:#181b22;--line:#2a2f3a;--tx:#e8eaf0;--mu:#8b93a5;--ac:#ff4d4d;--ok:#3ddc84;--wn:#ffb020}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px system-ui,sans-serif;display:flex;min-height:100vh}
+nav{width:200px;background:var(--card);border-right:1px solid var(--line);padding:16px 10px;position:sticky;top:0;height:100vh}
+nav h1{font-size:16px;margin:0 8px 16px}nav button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--mu);padding:11px;border-radius:8px;font-size:15px}
+nav button.on{background:#262b36;color:var(--tx)}main{flex:1;padding:16px;padding-bottom:90px;max-width:900px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+.stat b{display:block;font-size:22px}.stat span,small,label{color:var(--mu);font-size:12px}
+button.b{background:#262b36;color:var(--tx);border:1px solid var(--line);padding:10px 14px;border-radius:8px;font-size:14px}
+button.go{background:var(--ok);color:#000;border:0}button.stop{background:var(--ac);color:#fff;border:0}button.wn{background:var(--wn);color:#000;border:0}
+input,select{width:100%;background:var(--bg);color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:15px;margin:4px 0 10px}
+.pill{padding:3px 10px;border-radius:99px;font-size:12px;background:#262b36}.running{color:var(--ok)}.paused{color:var(--wn)}.stopped{color:var(--ac)}
+.log{font:12px monospace;padding:4px 0;border-bottom:1px solid var(--line)}.error{color:var(--ac)}.warn{color:var(--wn)}
+.idea h4{margin:0 0 4px}.bar{height:6px;background:var(--line);border-radius:4px;margin:6px 0}.bar i{display:block;height:100%;background:var(--ok);border-radius:4px}
+#toast{position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#262b36;border:1px solid var(--line);padding:10px 16px;border-radius:8px;display:none;z-index:9;max-width:90%}
+section{display:none}section.on{display:block}
+@media(max-width:700px){body{display:block}nav{position:fixed;bottom:0;top:auto;left:0;right:0;width:100%;height:auto;display:flex;padding:4px;z-index:5;border-top:1px solid var(--line);border-right:0}
+nav h1{display:none}nav button{text-align:center;font-size:12px;padding:10px 2px}}
+</style></head><body>
+<nav><h1>▶ Autopilot AI</h1>
+<button data-t="dash" class="on">Dashboard</button><button data-t="ideas">Ideas</button><button data-t="log">Activity</button><button data-t="set">Settings</button></nav>
+<main><div id="toast"></div>
+<section id="dash" class="on">
+ <div class="card"><div class="row"><b>Agent:</b><span id="state" class="pill">…</span><small id="niche"></small></div>
+  <div class="row" style="margin-top:10px"><button class="b go" onclick="act('start')">Start</button><button class="b wn" onclick="act('pause')">Pause</button><button class="b stop" onclick="act('stop')">■ EMERGENCY STOP</button></div></div>
+ <div class="card"><label>Automation mode</label>
+  <select id="mode" onchange="setMode(this.value)"><option value="manual">1 · Manual – I approve every step</option><option value="semi">2 · Semi-automatic – approve before upload</option><option value="full">3 · Full automatic – auto-approve by score rule</option></select>
+  <small id="modehelp"></small></div>
+ <div class="grid"><div class="card stat"><b id="s_calls">0</b><span>AI calls today</span></div><div class="card stat"><b id="s_pend">0</b><span>Ideas pending</span></div>
+  <div class="card stat"><b id="s_appr">0</b><span>Ideas approved</span></div><div class="card stat"><b id="s_cost">$0.00</b><span>Est. cost</span></div></div>
+ <div class="card"><label>Daily API usage</label><div class="bar"><i id="usebar" style="width:0"></i></div><small id="usetxt"></small></div>
+ <div class="card"><button class="b go" id="genbtn" onclick="gen()">Generate 10 video ideas</button> <small>Needs Start + free Gemini key</small></div>
+</section>
+<section id="ideas"><div id="ideaList"></div></section>
+<section id="log"><div class="card" id="logList"></div></section>
+<section id="set"><div class="card">
+ <label>Niche</label><input id="f_niche"><label>Gemini model name</label><input id="f_model">
+ <label>Daily AI call limit</label><input id="f_limit" type="number"><label>Auto-approve min score (Full mode, 0-100)</label><input id="f_min" type="number">
+ <label>Gemini API key <span id="keystate"></span></label><input id="f_key" type="password" placeholder="Paste to save/replace. Never shown again." autocomplete="off">
+ <div class="row"><button class="b go" onclick="save()">Save settings</button><button class="b stop" onclick="disc()">Disconnect key</button></div></div></section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const HELP={manual:"You approve each idea yourself.",semi:"Agent drafts ideas; you approve before anything is uploaded.",full:"Ideas scoring above your threshold are approved automatically."};
+function toast(m){const t=$('toast');t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(()=>t.style.display='none',3500)}
+async function api(p,m='GET',b){const r=await fetch(p,{method:m,headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined});
+ let d={};try{d=await r.json()}catch(e){}if(!r.ok)throw new Error(d.detail||('Error '+r.status));return d}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('nav button,section').forEach(e=>e.classList.remove('on'));b.classList.add('on');$(b.dataset.t).classList.add('on');if(b.dataset.t=='ideas')loadIdeas();if(b.dataset.t=='set')loadSettings()});
+let S={};
+async function refresh(){try{S=await api('/api/status');
+ $('state').textContent=S.state.toUpperCase();$('state').className='pill '+S.state;$('niche').textContent='Niche: '+S.niche;
+ $('mode').value=S.mode;$('modehelp').textContent=HELP[S.mode];
+ $('s_calls').textContent=S.calls_today;$('s_pend').textContent=S.idea_counts.pending||0;$('s_appr').textContent=S.idea_counts.approved||0;$('s_cost').textContent='$'+S.est_cost.toFixed(2);
+ const p=Math.min(100,S.calls_today/S.daily_limit*100);$('usebar').style.width=p+'%';$('usetxt').textContent=S.calls_today+' / '+S.daily_limit+' calls (free tier = $0)';
+ $('logList').replaceChildren(...S.activity.map(a=>{const d=document.createElement('div');d.className='log '+a.level;d.textContent=a.ts+'  '+a.msg;return d}));
+}catch(e){toast(e.message)}}
+async function act(a){try{await api('/api/agent/'+a,'POST');toast('Agent '+a);refresh()}catch(e){toast(e.message)}}
+async function setMode(m){try{await api('/api/mode','POST',{mode:m});refresh()}catch(e){toast(e.message)}}
+async function gen(){const b=$('genbtn');b.disabled=true;b.textContent='Researching…';
+ try{const r=await api('/api/ideas/generate','POST');toast('Added '+r.added+' ideas');loadIdeas()}catch(e){toast(e.message)}b.disabled=false;b.textContent='Generate 10 video ideas';refresh()}
+async function loadIdeas(){const l=await api('/api/ideas');const box=$('ideaList');box.replaceChildren();
+ if(!l.length){box.innerHTML='<div class="card">No ideas yet. Start the agent and generate some.</div>';return}
+ l.forEach(i=>{const c=document.createElement('div');c.className='card idea';
+  const h=document.createElement('h4');h.textContent=i.title;const p=document.createElement('small');p.textContent='Hook: '+i.hook;
+  const m=document.createElement('div');m.innerHTML='<small></small>';m.firstChild.textContent=`Score ${i.score}/100 · interest ${i.interest}/10 · competition ${i.competition}/10 · ${i.status}`;
+  const r=document.createElement('div');r.className='row';
+  [['approve','Approve','go'],['reject','Reject','stop']].forEach(([a,t,k])=>{const b=document.createElement('button');b.className='b '+k;b.textContent=t;b.onclick=async()=>{try{await api(`/api/ideas/${i.id}/${a}`,'POST');loadIdeas()}catch(e){toast(e.message)}};r.append(b)});
+  c.append(h,p,m,r);box.append(c)})}
+async function loadSettings(){await refresh();$('f_niche').value=S.niche;$('f_model').value=S.model;$('f_limit').value=S.daily_limit;$('f_min').value=S.auto_min_score;$('f_key').value='';
+ $('keystate').textContent=S.key_set?'(✔ saved)':'(not set)'}
+async function save(){try{await api('/api/settings','POST',{niche:$('f_niche').value,model:$('f_model').value,daily_limit:+$('f_limit').value,auto_min_score:+$('f_min').value,gemini_key:$('f_key').value});toast('Saved');loadSettings()}catch(e){toast(e.message)}}
+async function disc(){if(!confirm('Remove the saved API key?'))return;try{await api('/api/settings/key','DELETE');toast('Key removed');loadSettings()}catch(e){toast(e.message)}}
+refresh();setInterval(refresh,5000);
+</script></body></html>
